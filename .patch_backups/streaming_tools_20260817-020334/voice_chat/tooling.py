@@ -171,12 +171,11 @@ class ToolCallingChat:
             {"role": "user", "content": user_text},
         ]
 
-    def _request_stream(self, messages: list[dict[str, Any]]):
-        """Open one streaming Ollama /api/chat round with tools enabled."""
+    def _request(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
         payload = {
             "model": self.cfg.model,
             "messages": messages,
-            "stream": True,
+            "stream": False,
             "tools": self.tool_schemas,
             "think": self.cfg.think,
             "keep_alive": self.cfg.keep_alive,
@@ -189,7 +188,6 @@ class ToolCallingChat:
         response = requests.post(
             f"{self.cfg.base_url.rstrip('/')}/api/chat",
             json=payload,
-            stream=True,
             timeout=self.cfg.request_timeout_seconds,
         )
 
@@ -205,65 +203,10 @@ class ToolCallingChat:
                     or "does not" in lowered
                 )
             ):
-                response.close()
                 raise ToolSupportUnavailable(body)
+            response.raise_for_status()
 
-            try:
-                response.raise_for_status()
-            finally:
-                response.close()
-
-        return response
-
-    def _stream_round(self, messages: list[dict[str, Any]]):
-        """Yield visible content while accumulating a complete assistant turn."""
-        thinking_parts: list[str] = []
-        content_parts: list[str] = []
-        tool_calls: list[dict[str, Any]] = []
-
-        response = self._request_stream(messages)
-        try:
-            for raw_line in response.iter_lines(decode_unicode=True):
-                if not raw_line:
-                    continue
-
-                if isinstance(raw_line, bytes):
-                    raw_line = raw_line.decode("utf-8", errors="replace")
-
-                try:
-                    chunk = json.loads(raw_line)
-                except json.JSONDecodeError as exc:
-                    raise RuntimeError(
-                        f"Invalid Ollama streaming JSON: {raw_line[:200]!r}"
-                    ) from exc
-
-                stream_error = chunk.get("error")
-                if stream_error:
-                    raise RuntimeError(f"Ollama streaming error: {stream_error}")
-
-                message = chunk.get("message") or {}
-
-                thinking = message.get("thinking")
-                if thinking:
-                    thinking_parts.append(str(thinking))
-
-                content = message.get("content")
-                if content:
-                    piece = str(content)
-                    content_parts.append(piece)
-                    yield piece
-
-                calls = message.get("tool_calls") or []
-                if calls:
-                    tool_calls.extend(calls)
-        finally:
-            response.close()
-
-        return {
-            "thinking": "".join(thinking_parts),
-            "content": "".join(content_parts),
-            "tool_calls": tool_calls,
-        }
+        return response.json()
 
     @staticmethod
     def _arguments(call: dict[str, Any]) -> dict[str, Any]:
@@ -330,21 +273,18 @@ class ToolCallingChat:
 
         try:
             for _round in range(self.settings.max_rounds):
-                round_message = yield from self._stream_round(messages)
-
-                thinking = str(round_message.get("thinking") or "")
-                content = str(round_message.get("content") or "")
-                tool_calls = round_message.get("tool_calls") or []
+                response = self._request(messages)
+                message = response.get("message") or {}
+                tool_calls = message.get("tool_calls") or []
 
                 if tool_calls:
-                    assistant_message: dict[str, Any] = {
-                        "role": "assistant",
-                        "content": content,
-                        "tool_calls": tool_calls,
-                    }
-                    if thinking:
-                        assistant_message["thinking"] = thinking
-                    messages.append(assistant_message)
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": message.get("content") or "",
+                            "tool_calls": tool_calls,
+                        }
+                    )
 
                     for call in tool_calls:
                         total_calls += 1
@@ -387,12 +327,12 @@ class ToolCallingChat:
 
                     continue
 
-                answer = content.strip()
+                answer = str(message.get("content") or "").strip()
                 if not answer:
                     answer = "I couldn't produce a final response."
-                    yield answer
 
                 self._remember(user_text, answer)
+                yield answer
                 return
 
         except ToolSupportUnavailable:
@@ -410,6 +350,7 @@ class ToolCallingChat:
         )
         self._remember(user_text, answer)
         yield answer
+
 
 class ToolSupportUnavailable(RuntimeError):
     pass
