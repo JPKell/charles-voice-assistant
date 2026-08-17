@@ -1,0 +1,22 @@
+Local voice chat output tuning patch
+
+Requires:
+- split system-default audio patch
+
+Modifies:
+- voice_chat/audio.py only
+
+Changes:
+- prefer 48000 Hz system-default output
+- use ~100 ms output callback block
+- reduce output ring capacity from 4.0 s to 1.0 s
+- keep 0.60 s startup prebuffer
+- print active output block/buffer tuning at startup
+
+Preserves:
+- system-default input
+- system-default output
+- separate InputStream/OutputStream architecture
+- keyword barge-in
+- config.toml
+- Kokoro/Whisper/Ollama/tool settings

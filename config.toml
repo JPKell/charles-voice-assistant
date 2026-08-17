@@ -1,0 +1,172 @@
+[app]
+system_prompt = """
+You are a local voice assistant. Be conversational, useful, and concise by default.
+Your answer will be spoken aloud. Use natural sentences and short paragraphs.
+Avoid markdown formatting unless the user explicitly asks for them.
+Replace any URLs with a short description of the link. 
+Avoid long lists unless the user asks for them.
+"""
+max_history_turns = 10
+
+[ollama]
+base_url = "http://127.0.0.1:11434"
+model = "sorc/qwen3.5-instruct-heretic:latest"
+think = false
+temperature = 0.7
+num_ctx = 16500
+keep_alive = "30m"
+request_timeout_seconds = 300
+
+[stt]
+model = "small.en"
+device = "cpu" 
+compute_type = "int8"
+language = "en"
+cpu_threads = 8
+beam_size = 1
+
+[tts]
+periods_to_commas = true
+paragraphs_to_commas = true
+strip_characters = "#*`"
+lang_code = "a"
+speed = 1.1
+device = "cuda" # cpu
+volume = 1.0
+
+### Female voices ###
+# voice = "af_alloy"    # deeper 4.5
+# voice = "af_heart"    # medium 4.5
+# voice = "af_nicole"   # sexy whisper slow 4.5
+# voice = "af_bella"    # light weight 4
+# voice = "bf_lily"     # I'd accept it 4
+# voice = "af_kore"     # deeper 4 
+# voice = "af_sky"      # professional 4 
+# voice = "af_nova"     # medium 3.5
+# voice = "af_aoede"    # Lilting end  3.5
+# voice = "af_sarah"    # plain 3.5
+# voice = "bf_isabella" # Decent 35
+# voice = "bf_alice"    # Whiney brit 3
+# voice = "bf_emma"     # thin 3
+# voice = "af_river"    # plain 3 
+# voice = "af_jessica"  # meh 2.5
+
+### Male voices ###
+voice = "bm_george"   # Charles 4.5
+# voice = "am_michael"  # Narrator 4.5
+# voice = "am_onyx"     # Narrator 4.5
+# voice = "am_santa"    # fun 4.5
+# voice = "bm_daniel"   # 4 Kinda wraspy
+# voice = "am_adam"     # medium 4
+# voice = "am_liam"     # Decent 4 
+# voice = "am_puck"     # kinda gay 3.5
+# voice = "bm_fable"    # Decent 3.5
+# voice = "am_fenrir"   # higher 3.5
+# voice = "am_echo"     # muted 3
+# voice = "bm_lewis"      # Meh 3
+# voice = "am_eric"     # bad audio sound 2.5
+
+### International ###
+
+# voice = "ef_dora" #
+# voice = "em_alex" #
+# voice = "em_santa" #
+# voice = "ff_siwis" #
+# voice = "hf_alpha" #
+# voice = "hf_beta" #
+# voice = "hm_omega" #
+# voice = "hm_psi" #
+# voice = "if_sara" #
+# voice = "im_nicola" #
+# voice = "jf_alpha" #
+# voice = "jf_gongitsune" #
+# voice = "jf_nezumi" #
+#voice = "jf_tebukuro" #
+#voice = "jm_kumo" #
+# voice = "pf_dora" #
+# voice = "pm_alex" #
+# voice = "pm_santa" #
+#voice = "zf_xiaobei" #
+# voice = "zf_xiaoni" #
+#voice = "zf_xiaoxiao" #
+#voice = "zf_xiaoyi" #
+
+
+[voice_presets.female]
+voice = "af_alloy"
+lang_code = "a"
+# speed = 1.0
+
+[voice_presets.male]
+voice = "am_michael"
+lang_code = "a"
+# speed = 1.0
+
+[voice_presets.fun]
+voice = "am_santa"
+lang_code = "a"
+# speed = 1.05
+system_prompt = """
+You are a local voice assistant. You will respond in the personality of Santa Claus, being jolly, cheerful, and fun. 
+Every response should be from the perspective and canon of santa claus, ie. bad kids get coal, good kids get presents, you live at the north pole, you have elves, reindeer, and a sleigh, etc.
+End ocasional sentences with "Ho ho ho!" to maintain the Santa Claus persona.
+Be conversational, useful, and concise by default.
+Your answer will be spoken aloud. Use natural sentences and short paragraphs.
+Avoid markdown formatting unless the user explicitly asks for them.
+Replace any URLs with a short description of the link. 
+Avoid long lists unless the user asks for them.
+"""
+[voice_presets.sexy]
+voice = "af_nicole"
+lang_code = "a"
+speed = 1.2
+system_prompt_file = ".sy"
+
+
+[voice_presets.rabbi]
+voice = "am_onyx"
+lang_code = "a"
+speed = 0.96
+system_prompt = """
+You are a thoughtful, knowledgeable conversational assistant with a rabbinic teaching style.
+Explain ideas patiently, use stories and analogies when useful, and distinguish between Jewish traditions, interpretations, and schools of thought rather than presenting one view as universal.
+Keep spoken answers natural and concise unless the user asks for depth.
+Always consider the halakhic implications of your answers, and when appropriate, provide references to Jewish texts and sources.
+For example if a user asks how to cook lobster, you might explain that lobster is not kosher and provide a brief explanation of the relevant halakhic principles.
+"""
+
+[audio]
+sample_rate = 16000
+channels = 1
+block_ms = 30
+calibration_seconds = 1.0
+noise_multiplier = 3.0
+min_rms_threshold = 0.008
+silence_seconds = 0.9
+start_timeout_seconds = 60.0
+max_record_seconds = 45.0
+pre_roll_seconds = 0.25
+post_tts_pause_seconds = 0.20
+input_device = ""
+output_device = ""
+
+[features]
+barge_in_delay_seconds = 0.8
+barge_in_rms_multiplier = 1   ## Noise gate threshold
+barge_in = true
+barge_in_keyword_only = true
+
+barge_in_keywords = [
+    "okay",
+    "stop",
+    "wait",
+    "hold on"
+]
+
+barge_in_keyword_silence_seconds = 0.35
+barge_in_keyword_max_seconds = 2.0
+
+tts_chunk_chars = 800
+
+[memory]
+enabled = false
