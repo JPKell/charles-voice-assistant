@@ -986,25 +986,26 @@ class DuplexBargeInSession:
         return self.audio
 
     def _print_audio_stats(self) -> None:
-        input_high_ms = (
-            1000.0 * self._input_high_water_frames / float(self.input_rate)
-        )
-        output_high_ms = (
-            1000.0 * self._output_high_water_frames / float(self.output_rate)
-        )
+        pass
+        # input_high_ms = (
+        #     1000.0 * self._input_high_water_frames / float(self.input_rate)
+        # )
+        # output_high_ms = (
+        #     1000.0 * self._output_high_water_frames / float(self.output_rate)
+        # )
 
-        print(
-            "[audio] split stats: "
-            f"output_underflows={self._output_underflows}, "
-            f"software_starvations={self._software_starvations}, "
-            f"input_ring_drops={self._input_ring_drops}, "
-            f"input_high_water_ms={input_high_ms:.0f}, "
-            f"output_high_water_ms={output_high_ms:.0f}, "
-            f"input_overflows={self._input_overflows}, "
-            f"input_underflows={self._input_underflows}, "
-            f"output_status_events={self._output_status_events}, "
-            f"input_status_events={self._input_status_events}"
-        )
+        # print(
+        #     "[audio] split stats: "
+        #     f"output_underflows={self._output_underflows}, "
+        #     f"software_starvations={self._software_starvations}, "
+        #     f"input_ring_drops={self._input_ring_drops}, "
+        #     f"input_high_water_ms={input_high_ms:.0f}, "
+        #     f"output_high_water_ms={output_high_ms:.0f}, "
+        #     f"input_overflows={self._input_overflows}, "
+        #     f"input_underflows={self._input_underflows}, "
+        #     f"output_status_events={self._output_status_events}, "
+        #     f"input_status_events={self._input_status_events}"
+        # )
 
     def stop(self) -> None:
         self.stop_event.set()

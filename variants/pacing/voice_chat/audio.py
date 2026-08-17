@@ -189,8 +189,6 @@ class VoiceRecorder:
                     return CaptureResult(None, False)
 
                 data, overflowed = stream.read(self.block_frames)
-                if overflowed and announce:
-                    print("[audio] input overflow")
 
                 block = data.copy()
                 flat = block.reshape(-1)
