@@ -1,12 +1,17 @@
 [app]
 system_prompt = """
-You are a local voice assistant. Be conversational, useful, and concise by default.
+You are a local voice assistant named charles. Be conversational, useful, and concise by default.
+You are funny and tell jokes occasionally ever 1/12 responses. You are a good listener and will respond to the user's questions and comments in a helpful and engaging way.
 Your answer will be spoken aloud. Use natural sentences and short paragraphs.
 Avoid markdown formatting unless the user explicitly asks for them.
 Replace any URLs with a short description of the link. 
 Avoid long lists unless the user asks for them.
+Do not use emoticons or emojis in your responses.
 """
 max_history_turns = 10
+# Spoken once after initialization and before microphone listening begins.
+# Set this to an empty string to disable the greeting.
+startup_greeting = "Hello, I'm ready"
 
 [ollama]
 base_url = "http://127.0.0.1:11434"
@@ -30,9 +35,110 @@ periods_to_commas = true
 paragraphs_to_commas = true
 strip_characters = "#*`"
 lang_code = "a"
-speed = 1.1
 device = "cuda" # cpu
+voice = "bm_george"  
 volume = 1.0
+speed = 1.1
+
+
+
+[voice_presets.female]
+voice = "af_alloy"
+lang_code = "a"
+# speed = 1.0
+startup_greeting = "Hi there! What can I help you with today?"
+
+[voice_presets.male]
+voice = "am_michael"
+lang_code = "a"
+# speed = 1.0
+startup_greeting = "Hello. How can I help you today?"
+
+[voice_presets.fun]
+voice = "am_santa"
+lang_code = "a"
+# speed = 1.05
+system_prompt = """
+You are a local voice assistant. You will respond in the personality of Santa Claus, being jolly, cheerful, and fun. 
+Every response should be from the perspective and canon of santa claus, ie. bad kids get coal, good kids get presents, you live at the north pole, you have elves, reindeer, and a sleigh, etc.
+End ocasional sentences with "Ho ho ho!" to maintain the Santa Claus persona.
+Be conversational, useful, and concise by default.
+Your answer will be spoken aloud. Use natural sentences and short paragraphs.
+Avoid markdown formatting unless the user explicitly asks for them.
+Replace any URLs with a short description of the link. 
+Avoid long lists unless the user asks for them.
+"""
+startup_greeting = "Hohoho! What would you like little boy?"
+
+
+
+[voice_presets.sexy]
+voice = "af_nicole"
+lang_code = "a"
+speed = 1.2
+system_prompt_file = ".sy"
+startup_greeting = "Hi there, are you ready to have some fun?"
+
+
+[voice_presets.rabbi]
+voice = "am_onyx"
+lang_code = "a"
+speed = 0.96
+startup_greeting = "oi vey, what can I help you with today?"
+system_prompt = """
+You are a thoughtful, knowledgeable conversational assistant with a rabbinic teaching style.
+Explain ideas patiently, use stories and analogies when useful, and distinguish between Jewish traditions, interpretations, and schools of thought rather than presenting one view as universal.
+Keep spoken answers natural and concise unless the user asks for depth.
+Always consider the halakhic implications of your answers, and when appropriate, provide references to Jewish texts and sources.
+For example if a user asks how to cook lobster, you might explain that lobster is not kosher and provide a brief explanation of the relevant halakhic principles.
+"""
+
+[audio]
+sample_rate = 16000
+channels = 1
+block_ms = 30
+calibration_seconds = 1.0
+noise_multiplier = 3.0
+min_rms_threshold = 0.008
+silence_seconds = 0.9
+start_timeout_seconds = 60.0
+max_record_seconds = 45.0
+pre_roll_seconds = 0.25
+post_tts_pause_seconds = 0.20
+input_device = ""
+output_device = ""
+
+[features]
+stream_tts = true
+barge_in_delay_seconds = 0.8
+barge_in_rms_multiplier = 1.35  # Margin above the output-referenced echo estimate.
+barge_in_use_vad = false       # Keep barge-in responsive; normal STT still uses VAD.
+pipewire_echo_cancel = true     # Remove assistant playback from the microphone.
+barge_in = true
+barge_in_keyword_only = true
+
+barge_in_keywords = [
+    "okay",
+    "stop",
+    "wait",
+    "hold on",
+    "enough",
+    
+]
+
+barge_in_keyword_silence_seconds = 0.35
+barge_in_keyword_max_seconds = 2.0
+
+# Speak the first sentence quickly, then use larger chunks to keep Kokoro ahead
+# of playback without increasing the audio output buffer.
+first_tts_chunk_sentences = 1
+sentences_per_tts_chunk = 4
+sentence_max_chars = 800
+
+[memory]
+enabled = false
+
+
 
 ### Female voices ###
 # voice = "af_alloy"    # deeper 4.5
@@ -52,7 +158,7 @@ volume = 1.0
 # voice = "af_jessica"  # meh 2.5
 
 ### Male voices ###
-voice = "bm_george"   # Charles 4.5
+# voice = "bm_george"   # Charles 4.5
 # voice = "am_michael"  # Narrator 4.5
 # voice = "am_onyx"     # Narrator 4.5
 # voice = "am_santa"    # fun 4.5
@@ -90,83 +196,3 @@ voice = "bm_george"   # Charles 4.5
 # voice = "zf_xiaoni" #
 #voice = "zf_xiaoxiao" #
 #voice = "zf_xiaoyi" #
-
-
-[voice_presets.female]
-voice = "af_alloy"
-lang_code = "a"
-# speed = 1.0
-
-[voice_presets.male]
-voice = "am_michael"
-lang_code = "a"
-# speed = 1.0
-
-[voice_presets.fun]
-voice = "am_santa"
-lang_code = "a"
-# speed = 1.05
-system_prompt = """
-You are a local voice assistant. You will respond in the personality of Santa Claus, being jolly, cheerful, and fun. 
-Every response should be from the perspective and canon of santa claus, ie. bad kids get coal, good kids get presents, you live at the north pole, you have elves, reindeer, and a sleigh, etc.
-End ocasional sentences with "Ho ho ho!" to maintain the Santa Claus persona.
-Be conversational, useful, and concise by default.
-Your answer will be spoken aloud. Use natural sentences and short paragraphs.
-Avoid markdown formatting unless the user explicitly asks for them.
-Replace any URLs with a short description of the link. 
-Avoid long lists unless the user asks for them.
-"""
-[voice_presets.sexy]
-voice = "af_nicole"
-lang_code = "a"
-speed = 1.2
-system_prompt_file = ".sy"
-
-
-[voice_presets.rabbi]
-voice = "am_onyx"
-lang_code = "a"
-speed = 0.96
-system_prompt = """
-You are a thoughtful, knowledgeable conversational assistant with a rabbinic teaching style.
-Explain ideas patiently, use stories and analogies when useful, and distinguish between Jewish traditions, interpretations, and schools of thought rather than presenting one view as universal.
-Keep spoken answers natural and concise unless the user asks for depth.
-Always consider the halakhic implications of your answers, and when appropriate, provide references to Jewish texts and sources.
-For example if a user asks how to cook lobster, you might explain that lobster is not kosher and provide a brief explanation of the relevant halakhic principles.
-"""
-
-[audio]
-sample_rate = 16000
-channels = 1
-block_ms = 30
-calibration_seconds = 1.0
-noise_multiplier = 3.0
-min_rms_threshold = 0.008
-silence_seconds = 0.9
-start_timeout_seconds = 60.0
-max_record_seconds = 45.0
-pre_roll_seconds = 0.25
-post_tts_pause_seconds = 0.20
-input_device = ""
-output_device = ""
-
-[features]
-barge_in_delay_seconds = 0.8
-barge_in_rms_multiplier = 1   ## Noise gate threshold
-barge_in = true
-barge_in_keyword_only = true
-
-barge_in_keywords = [
-    "okay",
-    "stop",
-    "wait",
-    "hold on"
-]
-
-barge_in_keyword_silence_seconds = 0.35
-barge_in_keyword_max_seconds = 2.0
-
-tts_chunk_chars = 800
-
-[memory]
-enabled = false

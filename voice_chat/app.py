@@ -16,6 +16,14 @@ from .memory import MemoryStore
 from .persona import load_persona
 from .wake import WakeWordGate
 from .tooling import ToolCallingChat, load_tool_settings
+from .terminal import (
+    ASSISTANT_COLOR,
+    USER_COLOR,
+    enable_system_color,
+    print_message,
+    restore_system_color,
+    speaker_label,
+)
 
 
 EXIT_PHRASES = {
@@ -39,6 +47,10 @@ def current_voice_preset(args) -> str:
         if getattr(args, name, False):
             return name
     return "default"
+
+
+def assistant_name(args) -> str:
+    return "Charles" if current_voice_preset(args) == "default" else "Assistant"
 
 
 def reset_context_if_preset_changed(root: Path, llm, args) -> None:
@@ -125,8 +137,13 @@ def apply_voice_preset(cfg, args):
             )
             raise SystemExit(2)
 
+    app_updates = {}
     if system_prompt:
-        cfg.app = replace(cfg.app, system_prompt=system_prompt)
+        app_updates["system_prompt"] = system_prompt
+    if preset.startup_greeting is not None:
+        app_updates["startup_greeting"] = preset.startup_greeting
+    if app_updates:
+        cfg.app = replace(cfg.app, **app_updates)
 
     details = [cfg.tts.voice, f"lang={cfg.tts.lang_code}", f"speed={cfg.tts.speed:g}"]
     if preset.system_prompt_file:
@@ -234,6 +251,7 @@ class BargeInMonitor:
         threshold: float,
         delay_seconds: float,
         rms_multiplier: float,
+        use_vad: bool,
         output_device,
         *,
         stt=None,
@@ -260,6 +278,7 @@ class BargeInMonitor:
             output_device=output_device,
             delay_seconds=delay_seconds,
             rms_multiplier=rms_multiplier,
+            use_vad=use_vad,
             keyword_validator=validator,
             keyword_silence_seconds=keyword_silence_seconds,
             keyword_max_seconds=keyword_max_seconds,
@@ -269,10 +288,12 @@ class BargeInMonitor:
     def _validate_keyword(self, audio):
         transcript = self.stt.transcribe(audio).strip()
         normalized = normalize_barge_in_phrase(transcript)
-        if normalized in self.keywords:
-            keyword = self.keywords[normalized]
-            print(f"\n[barge-in keyword: {keyword}]")
-            return keyword
+        padded = f" {normalized} "
+        for normalized_keyword in sorted(self.keywords, key=len, reverse=True):
+            if f" {normalized_keyword} " in padded:
+                keyword = self.keywords[normalized_keyword]
+                print(f"\n[barge-in keyword: {keyword}]")
+                return keyword
         return None
 
     @property
@@ -311,12 +332,14 @@ def response_with_streaming_tts(
     threshold: float | None,
     features,
     stt=None,
+    assistant_label: str = "Assistant",
 ) -> tuple[str, object | None]:
     from .streaming import SentenceAccumulator
 
     accumulator = SentenceAccumulator(
         min_chars=features.sentence_min_chars,
         max_chars=features.sentence_max_chars,
+        first_sentences_per_chunk=features.first_tts_chunk_sentences,
         sentences_per_chunk=features.sentences_per_tts_chunk,
     )
     monitor = None
@@ -327,6 +350,7 @@ def response_with_streaming_tts(
                 threshold,
                 delay_seconds=features.barge_in_delay_seconds,
                 rms_multiplier=features.barge_in_rms_multiplier,
+                use_vad=features.barge_in_use_vad,
                 output_device=tts.output_device,
                 stt=stt,
                 keyword_only=features.barge_in_keyword_only,
@@ -349,7 +373,11 @@ def response_with_streaming_tts(
         else None
     )
 
-    print("\nAssistant: ", end="", flush=True)
+    print(
+        "\n" + speaker_label(assistant_label, ASSISTANT_COLOR) + " ",
+        end="",
+        flush=True,
+    )
     parts: list[str] = []
     stream = llm.chat_stream(user_text)
     interrupted = False
@@ -371,6 +399,7 @@ def response_with_streaming_tts(
             stream.close()
 
     answer = "".join(parts).strip()
+    restore_system_color()
 
     if interrupted:
         print("\n[barge-in: response interrupted]")
@@ -418,7 +447,9 @@ def response_with_streaming_tts(
 
 
 def main() -> int:
+    enable_system_color()
     args = parse_args()
+    current_assistant_name = assistant_name(args)
 
     if args.list_devices:
         from .audio import list_devices
@@ -496,6 +527,31 @@ def main() -> int:
         )
         return 2
 
+    echo_cancel = None
+    if (
+        cfg.features.barge_in
+        and cfg.features.pipewire_echo_cancel
+        and not args.no_tts
+        and args.text is None
+    ):
+        from .echo_cancel import PipeWireEchoCancel
+
+        echo_cancel = PipeWireEchoCancel()
+        if echo_cancel.start():
+            cfg.audio = replace(
+                cfg.audio,
+                input_device=echo_cancel.input_device,
+                output_device=echo_cancel.output_device,
+            )
+        else:
+            # Free-form detection on raw speaker/microphone audio self-triggers.
+            # Fail closed instead of interrupting every response unpredictably.
+            cfg.features = replace(cfg.features, barge_in=False)
+            print(
+                "[audio] barge-in disabled because echo cancellation could not start",
+                file=sys.stderr,
+            )
+
     tts = None
     worker = None
     if not args.no_tts:
@@ -511,6 +567,8 @@ def main() -> int:
             print(f"TTS initialization error: {type(exc).__name__}: {exc}", file=sys.stderr)
             if cfg.huggingface.offline_after_cache and not args.online_hf:
                 print("If this voice/model is not cached yet, rerun with --online-hf.", file=sys.stderr)
+            if echo_cancel is not None:
+                echo_cancel.stop()
             return 3
 
     print(
@@ -528,6 +586,7 @@ def main() -> int:
                 recorder=None,
                 threshold=None,
                 features=cfg.features,
+                assistant_label=current_assistant_name,
             )
             return 0
         finally:
@@ -547,6 +606,8 @@ def main() -> int:
             print("If the Whisper model is not cached yet, rerun with --online-hf.", file=sys.stderr)
         if worker is not None:
             worker.close()
+        if echo_cancel is not None:
+            echo_cancel.stop()
         return 4
 
     wake_gate = WakeWordGate(cfg.wake_word)
@@ -565,6 +626,20 @@ def main() -> int:
 
     pending_audio = None
     try:
+        try:
+            if cfg.app.startup_greeting:
+                print_message(
+                    current_assistant_name,
+                    cfg.app.startup_greeting,
+                    ASSISTANT_COLOR,
+                )
+                if tts is not None:
+                    tts.speak(cfg.app.startup_greeting)
+                    time.sleep(cfg.audio.post_tts_pause_seconds)
+        except KeyboardInterrupt:
+            print("\nStopped.")
+            return 0
+
         while True:
             try:
                 if pending_audio is not None:
@@ -583,10 +658,11 @@ def main() -> int:
                     print("I didn't catch that.")
                     continue
 
-                print(f"\nYou: {user_text}")
+                print("\n", end="")
+                print_message("You", user_text, USER_COLOR)
 
                 if user_text.strip().lower() in EXIT_PHRASES:
-                    print("Assistant: Goodbye.")
+                    print_message(current_assistant_name, "Goodbye.", ASSISTANT_COLOR)
                     if tts:
                         tts.speak("Goodbye.")
                     return 0
@@ -609,7 +685,7 @@ def main() -> int:
                 }:
                     llm.clear_history(persistent=False)
                     confirmation = "Context cleared."
-                    print(f"Assistant: {confirmation}")
+                    print_message(current_assistant_name, confirmation, ASSISTANT_COLOR)
                     if tts is not None:
                         tts.speak(confirmation)
                     continue
@@ -621,7 +697,7 @@ def main() -> int:
                 }:
                     llm.clear_history(persistent=True)
                     confirmation = "Conversation memory cleared."
-                    print(f"Assistant: {confirmation}")
+                    print_message(current_assistant_name, confirmation, ASSISTANT_COLOR)
                     if tts is not None:
                         tts.speak(confirmation)
                     continue
@@ -635,6 +711,7 @@ def main() -> int:
                     threshold=threshold,
                     features=cfg.features,
                     stt=stt,
+                    assistant_label=current_assistant_name,
                 )
                 if barge_audio is not None:
                     pending_audio = barge_audio
@@ -657,6 +734,8 @@ def main() -> int:
     finally:
         if worker is not None:
             worker.close()
+        if echo_cancel is not None:
+            echo_cancel.stop()
 
 
 if __name__ == "__main__":

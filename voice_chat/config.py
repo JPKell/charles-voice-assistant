@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 class AppConfig:
     system_prompt: str
     max_history_turns: int
+    startup_greeting: str = ""
 
 
 @dataclass
@@ -58,6 +59,7 @@ class VoicePresetConfig:
     speed: float | None = None
     system_prompt: str | None = None
     system_prompt_file: str | None = None
+    startup_greeting: str | None = None
 
 
 @dataclass
@@ -85,12 +87,15 @@ class FeaturesConfig:
     barge_in: bool = True
     barge_in_delay_seconds: float = 0.55
     barge_in_rms_multiplier: float = 2.0
+    barge_in_use_vad: bool = True
+    pipewire_echo_cancel: bool = False
     barge_in_keyword_only: bool = True
     barge_in_keywords: tuple[str, ...] = ("thank you", "okay", "stop", "wait")
     barge_in_keyword_silence_seconds: float = 0.35
     barge_in_keyword_max_seconds: float = 2.0
     sentence_min_chars: int = 8
     sentence_max_chars: int = 260
+    first_tts_chunk_sentences: int = 1
     sentences_per_tts_chunk: int = 2
 
 
@@ -181,6 +186,7 @@ def load_config(path: Path | None = None) -> Config:
             speed_value = section.get("speed")
             system_prompt_value = section.get("system_prompt")
             system_prompt_file_value = section.get("system_prompt_file")
+            startup_greeting_value = section.get("startup_greeting")
 
             voice_presets[str(name)] = VoicePresetConfig(
                 voice=voice,
@@ -196,6 +202,11 @@ def load_config(path: Path | None = None) -> Config:
                     if system_prompt_file_value in (None, "")
                     else str(system_prompt_file_value).strip()
                 ),
+                startup_greeting=(
+                    str(startup_greeting_value).strip()
+                    if "startup_greeting" in section
+                    else None
+                ),
             )
     features = raw.get("features", {})
     memory = raw.get("memory", {})
@@ -207,6 +218,7 @@ def load_config(path: Path | None = None) -> Config:
         app=AppConfig(
             system_prompt=str(app.get("system_prompt", "You are a useful local voice assistant.")),
             max_history_turns=int(app.get("max_history_turns", 10)),
+            startup_greeting=str(app.get("startup_greeting", "")).strip(),
         ),
         ollama=OllamaConfig(
             base_url=str(ollama.get("base_url", "http://127.0.0.1:11434")),
@@ -262,6 +274,8 @@ def load_config(path: Path | None = None) -> Config:
             barge_in=_b(features, "barge_in", True),
             barge_in_delay_seconds=float(features.get("barge_in_delay_seconds", 0.55)),
             barge_in_rms_multiplier=float(features.get("barge_in_rms_multiplier", 2.0)),
+            barge_in_use_vad=_b(features, "barge_in_use_vad", True),
+            pipewire_echo_cancel=_b(features, "pipewire_echo_cancel", False),
             barge_in_keyword_only=_b(features, "barge_in_keyword_only", True),
             barge_in_keywords=tuple(
                 str(value).strip().lower()
@@ -278,7 +292,15 @@ def load_config(path: Path | None = None) -> Config:
                 features.get("barge_in_keyword_max_seconds", 2.0)
             ),
             sentence_min_chars=int(features.get("sentence_min_chars", 8)),
-            sentence_max_chars=int(features.get("sentence_max_chars", 260)),
+            sentence_max_chars=int(
+                features.get(
+                    "sentence_max_chars",
+                    features.get("tts_chunk_chars", 260),
+                )
+            ),
+            first_tts_chunk_sentences=int(
+                features.get("first_tts_chunk_sentences", 1)
+            ),
             sentences_per_tts_chunk=int(features.get("sentences_per_tts_chunk", 2)),
         ),
         memory=MemoryConfig(

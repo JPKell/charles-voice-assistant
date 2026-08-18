@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import tempfile
+import threading
 
 import numpy as np
 from faster_whisper import WhisperModel
@@ -24,8 +25,13 @@ class SpeechToText:
             compute_type=cfg.compute_type,
             cpu_threads=cfg.cpu_threads,
         )
+        self._transcribe_lock = threading.Lock()
 
     def transcribe(self, audio: np.ndarray) -> str:
+        with self._transcribe_lock:
+            return self._transcribe(audio)
+
+    def _transcribe(self, audio: np.ndarray) -> str:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             path = Path(tmp.name)
 

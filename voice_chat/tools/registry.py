@@ -14,6 +14,18 @@ from urllib.parse import urlparse
 
 import requests
 
+from .system import (
+    launch_application,
+    list_applications,
+    list_devices,
+    process_monitor,
+    search_files,
+    service_logs,
+    service_status,
+    storage_permissions,
+    system_command,
+)
+
 
 ToolFunction = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -470,6 +482,150 @@ class ToolRegistry:
                     "additionalProperties": False,
                 },
                 function=_docker_status,
+            ),
+            "search_files": ToolDefinition(
+                name="search_files",
+                description=(
+                    "Search readable local files by file name or by literal text "
+                    "inside files. Results and search depth are bounded."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["query"],
+                    "properties": {
+                        "query": {"type": "string", "description": "Name fragment or literal text"},
+                        "path": {"type": "string", "description": "Directory to search; defaults to the home directory"},
+                        "mode": {"type": "string", "enum": ["name", "content"], "description": "Search names or file contents"},
+                        "max_depth": {"type": "integer", "minimum": 1, "maximum": 20, "description": "Name-search depth; default 6"},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 200, "description": "Maximum returned paths; default 50"},
+                    },
+                    "additionalProperties": False,
+                },
+                function=search_files,
+            ),
+            "list_applications": ToolDefinition(
+                name="list_applications",
+                description="List or search installed graphical applications without launching them.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Optional application-name filter"},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                    },
+                    "additionalProperties": False,
+                },
+                function=list_applications,
+            ),
+            "launch_application": ToolDefinition(
+                name="launch_application",
+                description=(
+                    "Launch an installed graphical application by exact name or "
+                    "desktop ID. Only use when the user explicitly asks to open or launch it."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["application"],
+                    "properties": {
+                        "application": {"type": "string", "description": "Exact installed application name or desktop ID"}
+                    },
+                    "additionalProperties": False,
+                },
+                function=launch_application,
+            ),
+            "list_devices": ToolDefinition(
+                name="list_devices",
+                description=(
+                    "List local storage, USB, PCI, audio, or network devices. "
+                    "Use category all only when a broad inventory is requested."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "enum": ["all", "storage", "usb", "pci", "audio_playback", "audio_capture", "network"],
+                        }
+                    },
+                    "additionalProperties": False,
+                },
+                function=list_devices,
+            ),
+            "storage_permissions": ToolDefinition(
+                name="storage_permissions",
+                description=(
+                    "Inspect the mount, filesystem, mount options, ownership, mode, "
+                    "and current user's read/write access for a drive or path."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Mounted drive or directory path; defaults to /"}
+                    },
+                    "additionalProperties": False,
+                },
+                function=storage_permissions,
+            ),
+            "process_monitor": ToolDefinition(
+                name="process_monitor",
+                description="Read a bounded snapshot of running processes sorted by CPU or memory usage.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "sort": {"type": "string", "enum": ["cpu", "memory"]},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    },
+                    "additionalProperties": False,
+                },
+                function=process_monitor,
+            ),
+            "service_status": ToolDefinition(
+                name="service_status",
+                description="Read current systemd service state and resource counters.",
+                parameters={
+                    "type": "object",
+                    "required": ["service"],
+                    "properties": {
+                        "service": {"type": "string", "description": "Systemd unit name, such as ollama.service"},
+                        "scope": {"type": "string", "enum": ["system", "user"]},
+                    },
+                    "additionalProperties": False,
+                },
+                function=service_status,
+            ),
+            "service_logs": ToolDefinition(
+                name="service_logs",
+                description="Read a bounded set of systemd journal entries for one service.",
+                parameters={
+                    "type": "object",
+                    "required": ["service"],
+                    "properties": {
+                        "service": {"type": "string", "description": "Systemd unit name"},
+                        "scope": {"type": "string", "enum": ["system", "user"]},
+                        "since": {"type": "string", "description": "Journal time such as today or 1 hour ago"},
+                        "lines": {"type": "integer", "minimum": 1, "maximum": 500},
+                    },
+                    "additionalProperties": False,
+                },
+                function=service_logs,
+            ),
+            "system_command": ToolDefinition(
+                name="system_command",
+                description=(
+                    "Run one predefined read-only system query. This is an "
+                    "allowlist and cannot execute arbitrary shell commands."
+                ),
+                parameters={
+                    "type": "object",
+                    "required": ["action"],
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["identity", "kernel", "uptime", "memory", "filesystems", "network", "temperatures"],
+                        }
+                    },
+                    "additionalProperties": False,
+                },
+                function=system_command,
             ),
             "web_search": ToolDefinition(
                 name="web_search",

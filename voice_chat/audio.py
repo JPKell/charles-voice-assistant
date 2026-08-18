@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 import math
+import queue
 import threading
 import time
 import wave
@@ -11,6 +12,7 @@ import numpy as np
 import sounddevice as sd
 
 from .config import AudioConfig, STTConfig
+from .terminal import print_dim
 
 
 def rms(samples: np.ndarray) -> float:
@@ -138,7 +140,7 @@ class VoiceRecorder:
             channels=self.cfg.channels,
             dtype="float32",
             blocksize=self.block_frames,
-            device=None,
+            device=self.cfg.input_device,
         ) as stream:
             for _ in range(blocks):
                 data, overflowed = stream.read(self.block_frames)
@@ -180,7 +182,7 @@ class VoiceRecorder:
             channels=self.cfg.channels,
             dtype="float32",
             blocksize=self.block_frames,
-            device=None,
+            device=self.cfg.input_device,
         ) as stream:
             while True:
                 if stop_event is not None and stop_event.is_set() and not started:
@@ -353,7 +355,9 @@ class DuplexBargeInSession:
     """
 
     INPUT_RATES = (16000, 48000, 44100, 32000, 24000)
-    OUTPUT_RATES = (48000, 44100, 24000, 32000, 16000)
+    # Prefer Kokoro's native rate to avoid per-chunk output resampling when the
+    # default device supports it. Fall back to common hardware rates.
+    OUTPUT_RATES = (24000, 48000, 44100, 32000, 16000)
     INPUT_CALLBACK_BLOCK_SECONDS = 0.060
     OUTPUT_CALLBACK_BLOCK_SECONDS = 0.100
     OUTPUT_BUFFER_SECONDS = 1.0
@@ -369,6 +373,7 @@ class DuplexBargeInSession:
         output_device,
         delay_seconds: float,
         rms_multiplier: float,
+        use_vad: bool = True,
         keyword_validator=None,
         keyword_silence_seconds: float = 0.35,
         keyword_max_seconds: float = 2.0,
@@ -377,12 +382,13 @@ class DuplexBargeInSession:
         self.cfg = recorder.cfg
         self.fallback_threshold = float(fallback_threshold)
 
-        # Kept only for API compatibility. This patch deliberately follows the
-        # current system default output instead of a configured device.
-        self.output_device = None
+        self.input_device = self.cfg.input_device
+        self.output_device = output_device
+        self.output_channels = self._choose_output_channels()
 
         self.delay_seconds = max(0.0, float(delay_seconds))
         self.rms_multiplier = max(1.0, float(rms_multiplier))
+        self.use_vad = bool(use_vad)
         self.keyword_validator = keyword_validator
         self.keyword_silence_seconds = max(0.15, float(keyword_silence_seconds))
         self.keyword_max_seconds = max(
@@ -425,7 +431,7 @@ class DuplexBargeInSession:
 
         self._output_ring = FrameRingBuffer(
             int(round(self.output_rate * self.OUTPUT_BUFFER_SECONDS)),
-            1,
+            self.output_channels,
         )
         self._input_ring = FrameRingBuffer(
             int(round(self.input_rate * self.INPUT_BUFFER_SECONDS)),
@@ -439,6 +445,15 @@ class DuplexBargeInSession:
             name="barge-in-detector",
             daemon=True,
         )
+        self._keyword_queue: queue.Queue[np.ndarray] | None = None
+        self._keyword_thread: threading.Thread | None = None
+        if self.keyword_validator is not None:
+            self._keyword_queue = queue.Queue(maxsize=1)
+            self._keyword_thread = threading.Thread(
+                target=self._keyword_validation_loop,
+                name="barge-in-keyword-validator",
+                daemon=True,
+            )
 
         self._state_lock = threading.Lock()
         self._first_playback_at: float | None = None
@@ -447,6 +462,7 @@ class DuplexBargeInSession:
         self._playback_expected = False
         self._output_callback_counter = 0
         self._last_output_callback = -1000000
+        self._output_reference_level = 0.0
 
         self._output_underflows = 0
         self._output_status_events = 0
@@ -458,6 +474,11 @@ class DuplexBargeInSession:
         self._input_ring_drops = 0
         self._input_high_water_frames = 0
         self._output_high_water_frames = 0
+        self._keyword_candidates = 0
+        self._keyword_rejections = 0
+        self._keyword_queue_drops = 0
+        self._echo_gain = 0.0
+        self._peak_input_to_gate_ratio = 0.0
 
     @property
     def playback(self):
@@ -482,7 +503,7 @@ class DuplexBargeInSession:
             tried.append(rate)
             try:
                 sd.check_input_settings(
-                    device=None,
+                    device=self.input_device,
                     channels=self.cfg.channels,
                     dtype="float32",
                     samplerate=rate,
@@ -500,8 +521,8 @@ class DuplexBargeInSession:
         for rate in self.OUTPUT_RATES:
             try:
                 sd.check_output_settings(
-                    device=None,
-                    channels=1,
+                    device=self.output_device,
+                    channels=self.output_channels,
                     dtype="float32",
                     samplerate=rate,
                 )
@@ -514,12 +535,19 @@ class DuplexBargeInSession:
             "any supported sample rate."
         )
 
+    def _choose_output_channels(self) -> int:
+        try:
+            info = sd.query_devices(self.output_device, kind="output")
+            return 2 if int(info.get("max_output_channels", 0)) >= 2 else 1
+        except Exception:
+            return 1
+
     def _open_input_stream(self):
         common = dict(
             samplerate=self.input_rate,
             channels=self.cfg.channels,
             dtype="float32",
-            device=None,
+            device=self.input_device,
             callback=self._input_callback,
             latency="high",
         )
@@ -542,9 +570,9 @@ class DuplexBargeInSession:
     def _open_output_stream(self):
         common = dict(
             samplerate=self.output_rate,
-            channels=1,
+            channels=self.output_channels,
             dtype="float32",
-            device=None,
+            device=self.output_device,
             callback=self._output_callback,
             latency="high",
         )
@@ -568,8 +596,8 @@ class DuplexBargeInSession:
         if self._input_stream is not None or self._output_stream is not None:
             return
 
-        input_name = self._default_device_name("input")
-        output_name = self._default_device_name("output")
+        input_name = str(self.input_device or self._default_device_name("input"))
+        output_name = str(self.output_device or self._default_device_name("output"))
 
         output_stream = None
         input_stream = None
@@ -596,15 +624,18 @@ class DuplexBargeInSession:
 
         self._output_stream = output_stream
         self._input_stream = input_stream
+        if self._keyword_thread is not None:
+            self._keyword_thread.start()
         self._detector_thread.start()
 
-        print(
+        print_dim(
             "[audio] split system-default streams; "
             f"input='{input_name}' @ {self.input_rate} Hz; "
             f"output='{output_name}' @ {self.output_rate} Hz; "
             f"output_block≈{1000.0 * self.output_block_frames / self.output_rate:.0f}ms; "
             f"prebuffer={self.OUTPUT_PREBUFFER_SECONDS:.2f}s; "
-            f"output_buffer={self.OUTPUT_BUFFER_SECONDS:.1f}s"
+            f"output_buffer={self.OUTPUT_BUFFER_SECONDS:.1f}s; "
+            f"barge_vad={'on' if self.use_vad else 'off'}"
         )
 
     def _record_input_status(self, status) -> None:
@@ -652,11 +683,19 @@ class DuplexBargeInSession:
             or self.stop_event.is_set()
             or self.detected_event.is_set()
         ):
+            self._output_reference_level *= 0.5
             return
 
-        wrote = self._output_ring.read_into(outdata[:, :1])
+        wrote = self._output_ring.read_into(outdata[:, : self.output_channels])
         if wrote:
             self._last_output_callback = self._output_callback_counter
+            played_level = rms(outdata[:wrote, 0])
+            self._output_reference_level = max(
+                played_level,
+                self._output_reference_level * 0.70,
+            )
+        else:
+            self._output_reference_level *= 0.5
 
         if self._playback_expected and wrote < frames:
             self._software_starvations += 1
@@ -682,6 +721,8 @@ class DuplexBargeInSession:
         stop_event: threading.Event | None,
     ) -> bool:
         array = np.asarray(samples, dtype=np.float32).reshape(-1, 1)
+        if self.output_channels == 2:
+            array = np.repeat(array, 2, axis=1)
         offset = 0
 
         while offset < array.shape[0]:
@@ -779,6 +820,44 @@ class DuplexBargeInSession:
             <= recent_callbacks
         )
 
+    def _keyword_validation_loop(self) -> None:
+        validation_queue = self._keyword_queue
+        if validation_queue is None or self.keyword_validator is None:
+            return
+
+        while not self.stop_event.is_set():
+            try:
+                candidate = validation_queue.get(timeout=0.10)
+            except queue.Empty:
+                continue
+
+            try:
+                accepted = None
+                try:
+                    accepted = self.keyword_validator(candidate)
+                except Exception as exc:
+                    print(f"[barge-in] keyword validator error: {exc}")
+
+                if accepted and not self.stop_event.is_set():
+                    self.recognized_keyword = str(accepted)
+                    self.audio = candidate
+                    self.detected_event.set()
+                    self._cancel_playback()
+                    return
+                self._keyword_rejections += 1
+            finally:
+                validation_queue.task_done()
+
+    def _queue_keyword_candidate(self, candidate: np.ndarray) -> None:
+        validation_queue = self._keyword_queue
+        if validation_queue is None:
+            return
+        self._keyword_candidates += 1
+        try:
+            validation_queue.put_nowait(candidate)
+        except queue.Full:
+            self._keyword_queue_drops += 1
+
     def _detector_loop(self) -> None:
         sample_rate = self.cfg.sample_rate
         pre_roll_limit = max(1, int(sample_rate * self.cfg.pre_roll_seconds))
@@ -809,9 +888,10 @@ class DuplexBargeInSession:
         candidate_hits = 0
         vad_speech = False
         echo_floor = self.fallback_threshold
+        echo_ratios: deque[float] = deque(maxlen=32)
 
         try:
-            while not self.stop_event.is_set():
+            while not self.stop_event.is_set() and not self.detected_event.is_set():
                 available = self._input_ring.available_read
                 if available <= 0:
                     time.sleep(0.008)
@@ -845,7 +925,8 @@ class DuplexBargeInSession:
                     removed = rolling.popleft()
                     rolling_samples -= removed.size
 
-                if self.recorder.vad.available and self.recorder.vad.should_check(mic.size):
+                vad_enabled = self.use_vad and self.recorder.vad.available
+                if vad_enabled and self.recorder.vad.should_check(mic.size):
                     window = np.concatenate(list(rolling)) if rolling else mic
                     vad_speech = self.recorder.vad.speech_recent(window)
 
@@ -856,7 +937,7 @@ class DuplexBargeInSession:
                     capture_rms_speech = level >= self.fallback_threshold
                     capture_speech = (
                         vad_speech and capture_rms_speech
-                        if self.recorder.vad.available
+                        if vad_enabled
                         else capture_rms_speech
                     )
                     if capture_speech:
@@ -874,16 +955,38 @@ class DuplexBargeInSession:
                 )
 
                 base_gate = self.fallback_threshold * self.rms_multiplier
+                output_reference = self._output_reference_level
+                if in_playback_grace and output_reference > 0.001:
+                    ratio = level / output_reference
+                    if 0.0 < ratio < 10.0:
+                        echo_ratios.append(ratio)
+                        ordered = sorted(echo_ratios)
+                        # A high percentile tolerates callback/input timing
+                        # mismatch without treating the loudest outlier as echo.
+                        index = int(round(0.75 * (len(ordered) - 1)))
+                        self._echo_gain = ordered[index]
+
+                expected_echo = (
+                    output_reference * self._echo_gain
+                    if self._echo_gain > 0.0 and output_reference > 0.0
+                    else echo_floor
+                )
                 gate = (
-                    max(base_gate, echo_floor * self.rms_multiplier)
+                    max(base_gate, expected_echo * self.rms_multiplier)
                     if playback_active
                     else base_gate
                 )
 
+                if gate > 0.0 and not in_playback_grace:
+                    self._peak_input_to_gate_ratio = max(
+                        self._peak_input_to_gate_ratio,
+                        level / gate,
+                    )
+
                 rms_speech = level >= gate
                 speech_now = (
                     vad_speech and rms_speech
-                    if self.recorder.vad.available
+                    if vad_enabled
                     else rms_speech
                 )
 
@@ -906,18 +1009,7 @@ class DuplexBargeInSession:
                     candidate = np.concatenate(candidate_audio).reshape(-1)
                     candidate = np.clip(candidate, -1.0, 1.0).astype(np.float32)
 
-                    accepted = None
-                    try:
-                        accepted = self.keyword_validator(candidate)
-                    except Exception as exc:
-                        print(f"[barge-in] keyword validator error: {exc}")
-
-                    if accepted:
-                        self.recognized_keyword = str(accepted)
-                        self.audio = candidate
-                        self.detected_event.set()
-                        self._cancel_playback()
-                        break
+                    self._queue_keyword_candidate(candidate)
 
                     candidate_active = False
                     candidate_audio = []
@@ -986,26 +1078,30 @@ class DuplexBargeInSession:
         return self.audio
 
     def _print_audio_stats(self) -> None:
-        pass
-        # input_high_ms = (
-        #     1000.0 * self._input_high_water_frames / float(self.input_rate)
-        # )
-        # output_high_ms = (
-        #     1000.0 * self._output_high_water_frames / float(self.output_rate)
-        # )
+        input_high_ms = (
+            1000.0 * self._input_high_water_frames / float(self.input_rate)
+        )
+        output_high_ms = (
+            1000.0 * self._output_high_water_frames / float(self.output_rate)
+        )
 
-        # print(
-        #     "[audio] split stats: "
-        #     f"output_underflows={self._output_underflows}, "
-        #     f"software_starvations={self._software_starvations}, "
-        #     f"input_ring_drops={self._input_ring_drops}, "
-        #     f"input_high_water_ms={input_high_ms:.0f}, "
-        #     f"output_high_water_ms={output_high_ms:.0f}, "
-        #     f"input_overflows={self._input_overflows}, "
-        #     f"input_underflows={self._input_underflows}, "
-        #     f"output_status_events={self._output_status_events}, "
-        #     f"input_status_events={self._input_status_events}"
-        # )
+        print_dim(
+            "[audio] split stats: "
+            f"output_underflows={self._output_underflows}, "
+            f"software_starvations={self._software_starvations}, "
+            f"input_ring_drops={self._input_ring_drops}, "
+            f"input_high_water_ms={input_high_ms:.0f}, "
+            f"output_high_water_ms={output_high_ms:.0f}, "
+            f"input_overflows={self._input_overflows}, "
+            f"input_underflows={self._input_underflows}, "
+            f"output_status_events={self._output_status_events}, "
+            f"input_status_events={self._input_status_events}, "
+            f"keyword_candidates={self._keyword_candidates}, "
+            f"keyword_rejections={self._keyword_rejections}, "
+            f"keyword_queue_drops={self._keyword_queue_drops}, "
+            f"echo_gain={self._echo_gain:.3f}, "
+            f"peak_gate_ratio={self._peak_input_to_gate_ratio:.2f}"
+        )
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -1013,6 +1109,8 @@ class DuplexBargeInSession:
 
         if self._detector_thread.is_alive():
             self._detector_thread.join(timeout=1.5)
+        if self._keyword_thread is not None and self._keyword_thread.is_alive():
+            self._keyword_thread.join(timeout=0.25)
 
         input_stream = self._input_stream
         output_stream = self._output_stream
@@ -1053,7 +1151,7 @@ def play_audio_interruptible(
     if audio.size == 0:
         return True
 
-    sd.play(audio, sample_rate, device=None, blocking=False)
+    sd.play(audio, sample_rate, device=output_device, blocking=False)
     duration = len(audio) / float(sample_rate)
     deadline = time.monotonic() + duration + 0.25
 
@@ -1069,7 +1167,11 @@ def play_audio_interruptible(
             pass
         time.sleep(0.02)
 
-    sd.wait()
+    # Some virtual PipeWire sinks keep sounddevice's stream marked active even
+    # after every sample has been submitted. Never hand control to sd.wait()
+    # here because it has no timeout and can prevent the listening loop from
+    # starting. The deadline already includes the clip duration and drain time.
+    sd.stop()
     return stop_event is None or not stop_event.is_set()
 
 

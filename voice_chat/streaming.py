@@ -18,11 +18,14 @@ class SentenceAccumulator:
         min_chars: int = 8,
         max_chars: int = 260,
         sentences_per_chunk: int = 2,
+        first_sentences_per_chunk: int = 1,
     ):
         self.buffer = ""
         self.min_chars = max(1, min_chars)
         self.max_chars = max(self.min_chars, max_chars)
+        self.first_sentences_per_chunk = max(1, first_sentences_per_chunk)
         self.sentences_per_chunk = max(1, sentences_per_chunk)
+        self.emitted_chunks = 0
 
     def feed(self, chunk: str) -> list[str]:
         self.buffer += chunk
@@ -30,8 +33,11 @@ class SentenceAccumulator:
 
         while True:
             boundary = self._find_group_boundary(self.buffer)
-            if boundary is None:
-                boundary = self._find_soft_boundary(self.buffer)
+            soft_boundary = self._find_soft_boundary(self.buffer)
+            if soft_boundary is not None and (
+                boundary is None or soft_boundary < boundary
+            ):
+                boundary = soft_boundary
             if boundary is None:
                 break
 
@@ -39,6 +45,7 @@ class SentenceAccumulator:
             self.buffer = self.buffer[boundary:].lstrip()
             if piece:
                 ready.append(piece)
+                self.emitted_chunks += 1
 
         return ready
 
@@ -51,6 +58,11 @@ class SentenceAccumulator:
         if len(text) < self.min_chars:
             return None
 
+        target_sentences = (
+            self.first_sentences_per_chunk
+            if self.emitted_chunks == 0
+            else self.sentences_per_chunk
+        )
         count = 0
         i = 0
         length = len(text)
@@ -72,7 +84,7 @@ class SentenceAccumulator:
                         prev -= 1
                     if prev < 0 or text[prev] not in ".!?":
                         count += 1
-                        if count >= self.sentences_per_chunk:
+                        if count >= target_sentences:
                             return j
                     i = max(i + 1, j)
                     continue
@@ -84,7 +96,7 @@ class SentenceAccumulator:
 
                 if j < length and text[j].isspace():
                     count += 1
-                    if count >= self.sentences_per_chunk:
+                    if count >= target_sentences:
                         return j
 
             i += 1
