@@ -359,9 +359,9 @@ class DuplexBargeInSession:
     # default device supports it. Fall back to common hardware rates.
     OUTPUT_RATES = (24000, 48000, 44100, 32000, 16000)
     INPUT_CALLBACK_BLOCK_SECONDS = 0.060
-    OUTPUT_CALLBACK_BLOCK_SECONDS = 0.100
+    OUTPUT_CALLBACK_BLOCK_SECONDS = 0.060
     OUTPUT_BUFFER_SECONDS = 1.0
-    OUTPUT_PREBUFFER_SECONDS = 0.60
+    OUTPUT_PREBUFFER_SECONDS = 0.18
     INPUT_BUFFER_SECONDS = 8.0
     DETECTOR_BATCH_SECONDS = 0.12
 
@@ -385,6 +385,14 @@ class DuplexBargeInSession:
         self.input_device = self.cfg.input_device
         self.output_device = output_device
         self.output_channels = self._choose_output_channels()
+        self.output_block_seconds = max(
+            0.02,
+            float(getattr(self.cfg, "output_block_ms", 60)) / 1000.0,
+        )
+        self.output_prebuffer_seconds = max(
+            self.output_block_seconds,
+            float(getattr(self.cfg, "output_prebuffer_seconds", 0.18)),
+        )
 
         self.delay_seconds = max(0.0, float(delay_seconds))
         self.rms_multiplier = max(1.0, float(rms_multiplier))
@@ -418,11 +426,11 @@ class DuplexBargeInSession:
         )
         self.output_block_frames = max(
             128,
-            int(round(self.output_rate * self.OUTPUT_CALLBACK_BLOCK_SECONDS)),
+            int(round(self.output_rate * self.output_block_seconds)),
         )
         self.output_prebuffer_frames = max(
             self.output_block_frames,
-            int(round(self.output_rate * self.OUTPUT_PREBUFFER_SECONDS)),
+            int(round(self.output_rate * self.output_prebuffer_seconds)),
         )
         self.detector_batch_frames = max(
             self.input_block_frames,
@@ -633,7 +641,7 @@ class DuplexBargeInSession:
             f"input='{input_name}' @ {self.input_rate} Hz; "
             f"output='{output_name}' @ {self.output_rate} Hz; "
             f"output_block≈{1000.0 * self.output_block_frames / self.output_rate:.0f}ms; "
-            f"prebuffer={self.OUTPUT_PREBUFFER_SECONDS:.2f}s; "
+            f"prebuffer={self.output_prebuffer_seconds:.2f}s; "
             f"output_buffer={self.OUTPUT_BUFFER_SECONDS:.1f}s; "
             f"barge_vad={'on' if self.use_vad else 'off'}"
         )

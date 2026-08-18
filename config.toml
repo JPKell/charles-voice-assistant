@@ -1,34 +1,30 @@
 [app]
-system_prompt = """
-You are a local voice assistant named charles. Be conversational, useful, and concise by default.
-You are funny and tell jokes occasionally ever 1/12 responses. You are a good listener and will respond to the user's questions and comments in a helpful and engaging way.
-Your answer will be spoken aloud. Use natural sentences and short paragraphs.
-Avoid markdown formatting unless the user explicitly asks for them.
-Replace any URLs with a short description of the link. 
-Avoid long lists unless the user asks for them.
-Do not use emoticons or emojis in your responses.
-"""
-max_history_turns = 10
+system_prompt = "You are Charles, Jordan's concise, conversational local voice assistant in Vancouver on Ubuntu 26.04. Responses are spoken: use short natural paragraphs, no Markdown or emojis, avoid long lists unless asked, and describe rather than recite URLs. Listen carefully and make an occasional joke, about once every twelve responses."
+max_history_turns = 4
 # Spoken once after initialization and before microphone listening begins.
 # Set this to an empty string to disable the greeting.
 startup_greeting = "Hello, I'm ready"
+goodbye_message = "Goodbye, Jordan."
 
 [ollama]
 base_url = "http://127.0.0.1:11434"
-model = "sorc/qwen3.5-instruct-heretic:latest"
+model = "qwen3.5:9b-q8_0"
+# model = "gemma3:latest"
 think = false
 temperature = 0.7
-num_ctx = 16500
+num_ctx = 8192
+num_predict = 512
 keep_alive = "30m"
 request_timeout_seconds = 300
 
 [stt]
 model = "small.en"
-device = "cpu" 
-compute_type = "int8"
+device = "cuda"
+compute_type = "float16"
 language = "en"
 cpu_threads = 8
 beam_size = 1
+vad_filter = false
 
 [tts]
 periods_to_commas = true
@@ -36,12 +32,14 @@ paragraphs_to_commas = true
 strip_characters = "#*`"
 lang_code = "a"
 device = "cuda" # cpu
-voice = "bm_george"  
+voice = "bm_george"
 volume = 1.0
 speed = 1.1
 
 
 
+# Each voice preset may optionally override [ollama].model, for example:
+# model = "another-model:tag"
 [voice_presets.female]
 voice = "af_alloy"
 lang_code = "a"
@@ -55,17 +53,18 @@ lang_code = "a"
 startup_greeting = "Hello. How can I help you today?"
 
 [voice_presets.fun]
+model = "sorc/qwen3.5-instruct-heretic:latest"
 voice = "am_santa"
 lang_code = "a"
 # speed = 1.05
 system_prompt = """
-You are a local voice assistant. You will respond in the personality of Santa Claus, being jolly, cheerful, and fun. 
+You are a local voice assistant. You will respond in the personality of Santa Claus, being jolly, cheerful, and fun.
 Every response should be from the perspective and canon of santa claus, ie. bad kids get coal, good kids get presents, you live at the north pole, you have elves, reindeer, and a sleigh, etc.
 End ocasional sentences with "Ho ho ho!" to maintain the Santa Claus persona.
 Be conversational, useful, and concise by default.
 Your answer will be spoken aloud. Use natural sentences and short paragraphs.
 Avoid markdown formatting unless the user explicitly asks for them.
-Replace any URLs with a short description of the link. 
+Replace any URLs with a short description of the link.
 Avoid long lists unless the user asks for them.
 """
 startup_greeting = "Hohoho! What would you like little boy?"
@@ -73,12 +72,20 @@ startup_greeting = "Hohoho! What would you like little boy?"
 
 
 [voice_presets.sexy]
+model = "sorc/qwen3.5-instruct-heretic:latest"
 voice = "af_nicole"
 lang_code = "a"
 speed = 1.2
 system_prompt_file = ".sy"
 startup_greeting = "Hi there, are you ready to have some fun?"
 
+[voice_presets.rough]
+model = "sorc/qwen3.5-instruct-heretic:latest"
+voice = "af_nicole"
+lang_code = "a"
+speed = 1.2
+system_prompt_file = ".kh"
+startup_greeting = "Hi there, are you ready to have some fun?"
 
 [voice_presets.rabbi]
 voice = "am_onyx"
@@ -100,13 +107,15 @@ block_ms = 30
 calibration_seconds = 1.0
 noise_multiplier = 3.0
 min_rms_threshold = 0.008
-silence_seconds = 0.9
+silence_seconds = 0.6
 start_timeout_seconds = 60.0
 max_record_seconds = 45.0
 pre_roll_seconds = 0.25
-post_tts_pause_seconds = 0.20
+post_tts_pause_seconds = 0.10
 input_device = ""
 output_device = ""
+output_block_ms = 60
+output_prebuffer_seconds = 0.18
 
 [features]
 stream_tts = true
@@ -123,7 +132,6 @@ barge_in_keywords = [
     "wait",
     "hold on",
     "enough",
-    
 ]
 
 barge_in_keyword_silence_seconds = 0.35
@@ -132,6 +140,7 @@ barge_in_keyword_max_seconds = 2.0
 # Speak the first sentence quickly, then use larger chunks to keep Kokoro ahead
 # of playback without increasing the audio output buffer.
 first_tts_chunk_sentences = 1
+first_tts_chunk_chars = 120
 sentences_per_tts_chunk = 4
 sentence_max_chars = 800
 
@@ -146,15 +155,15 @@ enabled = false
 # voice = "af_nicole"   # sexy whisper slow 4.5
 # voice = "af_bella"    # light weight 4
 # voice = "bf_lily"     # I'd accept it 4
-# voice = "af_kore"     # deeper 4 
-# voice = "af_sky"      # professional 4 
+# voice = "af_kore"     # deeper 4
+# voice = "af_sky"      # professional 4
 # voice = "af_nova"     # medium 3.5
 # voice = "af_aoede"    # Lilting end  3.5
 # voice = "af_sarah"    # plain 3.5
 # voice = "bf_isabella" # Decent 35
 # voice = "bf_alice"    # Whiney brit 3
 # voice = "bf_emma"     # thin 3
-# voice = "af_river"    # plain 3 
+# voice = "af_river"    # plain 3
 # voice = "af_jessica"  # meh 2.5
 
 ### Male voices ###
@@ -164,7 +173,7 @@ enabled = false
 # voice = "am_santa"    # fun 4.5
 # voice = "bm_daniel"   # 4 Kinda wraspy
 # voice = "am_adam"     # medium 4
-# voice = "am_liam"     # Decent 4 
+# voice = "am_liam"     # Decent 4
 # voice = "am_puck"     # kinda gay 3.5
 # voice = "bm_fable"    # Decent 3.5
 # voice = "am_fenrir"   # higher 3.5

@@ -17,12 +17,17 @@ class SentenceAccumulator:
         self,
         min_chars: int = 8,
         max_chars: int = 260,
+        first_max_chars: int | None = None,
         sentences_per_chunk: int = 2,
         first_sentences_per_chunk: int = 1,
     ):
         self.buffer = ""
         self.min_chars = max(1, min_chars)
         self.max_chars = max(self.min_chars, max_chars)
+        self.first_max_chars = max(
+            self.min_chars,
+            self.max_chars if first_max_chars is None else first_max_chars,
+        )
         self.first_sentences_per_chunk = max(1, first_sentences_per_chunk)
         self.sentences_per_chunk = max(1, sentences_per_chunk)
         self.emitted_chunks = 0
@@ -104,15 +109,16 @@ class SentenceAccumulator:
         return None
 
     def _find_soft_boundary(self, text: str) -> int | None:
-        if len(text) <= self.max_chars:
+        limit = self.first_max_chars if self.emitted_chunks == 0 else self.max_chars
+        if len(text) <= limit:
             return None
 
-        window = text[: self.max_chars]
+        window = text[:limit]
         for delimiter in ("; ", ": ", ", ", " "):
             pos = window.rfind(delimiter)
             if pos >= self.min_chars:
                 return pos + len(delimiter)
-        return self.max_chars
+        return limit
 
 
 @dataclass

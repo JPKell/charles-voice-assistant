@@ -39,7 +39,7 @@ EXIT_PHRASES = {
 
 
 # The CLI names are fixed, but the actual Kokoro voices come from config.toml.
-VOICE_PRESET_NAMES = ("sexy", "female", "male", "fun", "rabbi")
+VOICE_PRESET_NAMES = ("sexy", "female", "male", "rough", "fun", "rabbi")
 
 
 def current_voice_preset(args) -> str:
@@ -115,6 +115,8 @@ def apply_voice_preset(cfg, args):
         updates["speed"] = preset.speed
 
     cfg.tts = replace(cfg.tts, **updates)
+    if preset.model is not None:
+        cfg.ollama = replace(cfg.ollama, model=preset.model)
 
     system_prompt = preset.system_prompt
     if preset.system_prompt_file:
@@ -146,6 +148,8 @@ def apply_voice_preset(cfg, args):
         cfg.app = replace(cfg.app, **app_updates)
 
     details = [cfg.tts.voice, f"lang={cfg.tts.lang_code}", f"speed={cfg.tts.speed:g}"]
+    if preset.model:
+        details.append(f"model={preset.model}")
     if preset.system_prompt_file:
         details.append(f"system prompt={preset.system_prompt_file}")
     elif preset.system_prompt:
@@ -208,6 +212,11 @@ def parse_args() -> argparse.Namespace:
         "--male",
         action="store_true",
         help="Use [voice_presets.male] from config.toml for this run",
+    )
+    voice_group.add_argument(
+        "--rough",
+        action="store_true",
+        help="Use [voice_presets.rough] from config.toml for this run",
     )
     voice_group.add_argument(
         "--fun",
@@ -339,6 +348,7 @@ def response_with_streaming_tts(
     accumulator = SentenceAccumulator(
         min_chars=features.sentence_min_chars,
         max_chars=features.sentence_max_chars,
+        first_max_chars=features.first_tts_chunk_chars,
         first_sentences_per_chunk=features.first_tts_chunk_sentences,
         sentences_per_chunk=features.sentences_per_tts_chunk,
     )
@@ -519,10 +529,13 @@ def main() -> int:
 
     try:
         llm.healthcheck()
+        print(f"Preloading Ollama model: {cfg.ollama.model}...")
+        llm.warmup()
     except (requests.RequestException, OSError) as exc:
         print(
-            f"Cannot reach Ollama at {cfg.ollama.base_url}: {exc}\n"
-            "Check: systemctl status ollama",
+            f"Cannot prepare Ollama model {cfg.ollama.model} at "
+            f"{cfg.ollama.base_url}: {exc}\n"
+            "Check the model name and: systemctl status ollama",
             file=sys.stderr,
         )
         return 2
@@ -662,9 +675,10 @@ def main() -> int:
                 print_message("You", user_text, USER_COLOR)
 
                 if user_text.strip().lower() in EXIT_PHRASES:
-                    print_message(current_assistant_name, "Goodbye.", ASSISTANT_COLOR)
+                    goodbye = cfg.app.goodbye_message or "Goodbye."
+                    print_message(current_assistant_name, goodbye, ASSISTANT_COLOR)
                     if tts:
-                        tts.speak("Goodbye.")
+                        tts.speak(goodbye)
                     return 0
 
                 accepted, command = wake_gate.process(user_text)

@@ -13,6 +13,7 @@ class AppConfig:
     system_prompt: str
     max_history_turns: int
     startup_greeting: str = ""
+    goodbye_message: str = "Goodbye."
 
 
 @dataclass
@@ -22,6 +23,7 @@ class OllamaConfig:
     think: bool
     temperature: float
     num_ctx: int
+    num_predict: int
     keep_alive: str
     request_timeout_seconds: int
 
@@ -55,6 +57,7 @@ class TTSConfig:
 @dataclass
 class VoicePresetConfig:
     voice: str
+    model: str | None = None
     lang_code: str | None = None
     speed: float | None = None
     system_prompt: str | None = None
@@ -79,6 +82,8 @@ class AudioConfig:
     output_device: str | int | None
     vad_window_ms: int = 480
     vad_check_ms: int = 120
+    output_block_ms: int = 60
+    output_prebuffer_seconds: float = 0.18
 
 
 @dataclass
@@ -95,6 +100,7 @@ class FeaturesConfig:
     barge_in_keyword_max_seconds: float = 2.0
     sentence_min_chars: int = 8
     sentence_max_chars: int = 260
+    first_tts_chunk_chars: int = 120
     first_tts_chunk_sentences: int = 1
     sentences_per_tts_chunk: int = 2
 
@@ -182,6 +188,7 @@ def load_config(path: Path | None = None) -> Config:
             if not voice:
                 continue
 
+            model_value = section.get("model")
             lang_value = section.get("lang_code")
             speed_value = section.get("speed")
             system_prompt_value = section.get("system_prompt")
@@ -190,6 +197,11 @@ def load_config(path: Path | None = None) -> Config:
 
             voice_presets[str(name)] = VoicePresetConfig(
                 voice=voice,
+                model=(
+                    None
+                    if model_value is None or not str(model_value).strip()
+                    else str(model_value).strip()
+                ),
                 lang_code=None if lang_value in (None, "") else str(lang_value),
                 speed=None if speed_value is None else float(speed_value),
                 system_prompt=(
@@ -219,6 +231,7 @@ def load_config(path: Path | None = None) -> Config:
             system_prompt=str(app.get("system_prompt", "You are a useful local voice assistant.")),
             max_history_turns=int(app.get("max_history_turns", 10)),
             startup_greeting=str(app.get("startup_greeting", "")).strip(),
+            goodbye_message=str(app.get("goodbye_message", "Goodbye.")).strip(),
         ),
         ollama=OllamaConfig(
             base_url=str(ollama.get("base_url", "http://127.0.0.1:11434")),
@@ -226,6 +239,7 @@ def load_config(path: Path | None = None) -> Config:
             think=_b(ollama, "think", False),
             temperature=float(ollama.get("temperature", 0.7)),
             num_ctx=int(ollama.get("num_ctx", 8192)),
+            num_predict=int(ollama.get("num_predict", 256)),
             keep_alive=str(ollama.get("keep_alive", "1m")),
             request_timeout_seconds=int(ollama.get("request_timeout_seconds", 300)),
         ),
@@ -268,6 +282,10 @@ def load_config(path: Path | None = None) -> Config:
             output_device=_audio_device(audio.get("output_device")),
             vad_window_ms=int(audio.get("vad_window_ms", 480)),
             vad_check_ms=int(audio.get("vad_check_ms", 120)),
+            output_block_ms=int(audio.get("output_block_ms", 60)),
+            output_prebuffer_seconds=float(
+                audio.get("output_prebuffer_seconds", 0.18)
+            ),
         ),
         features=FeaturesConfig(
             stream_tts=_b(features, "stream_tts", True),
@@ -297,6 +315,9 @@ def load_config(path: Path | None = None) -> Config:
                     "sentence_max_chars",
                     features.get("tts_chunk_chars", 260),
                 )
+            ),
+            first_tts_chunk_chars=int(
+                features.get("first_tts_chunk_chars", 120)
             ),
             first_tts_chunk_sentences=int(
                 features.get("first_tts_chunk_sentences", 1)

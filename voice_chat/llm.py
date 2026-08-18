@@ -30,6 +30,21 @@ class OllamaChat:
         response = requests.get(url, timeout=5)
         response.raise_for_status()
 
+    def warmup(self) -> None:
+        """Load the configured model and context before microphone listening."""
+        response = requests.post(
+            f"{self.cfg.base_url.rstrip('/')}/api/generate",
+            json={
+                "model": self.cfg.model,
+                "prompt": "",
+                "stream": False,
+                "keep_alive": self.cfg.keep_alive,
+                "options": {"num_ctx": self.cfg.num_ctx},
+            },
+            timeout=self.cfg.request_timeout_seconds,
+        )
+        response.raise_for_status()
+
     def _messages(self, user_text: str) -> list[dict[str, str]]:
         keep_messages = max(0, self.max_history_turns * 2)
         recent = self.history[-keep_messages:] if keep_messages else []
@@ -50,6 +65,7 @@ class OllamaChat:
             "options": {
                 "temperature": self.cfg.temperature,
                 "num_ctx": self.cfg.num_ctx,
+                "num_predict": self.cfg.num_predict,
             },
         }
 

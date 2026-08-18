@@ -66,6 +66,15 @@ echo
 echo "Installing common voice-assistant dependencies..."
 .venv/bin/python -m pip install -r requirements.txt
 
+# CTranslate2 currently requires CUDA 12 cuBLAS and cuDNN 9, while PyTorch may
+# use a newer CUDA runtime. Keep the Whisper libraries isolated so both stacks
+# can coexist; voice_chat/stt.py preloads only the required shared libraries.
+echo
+echo "Installing isolated CUDA 12 runtime for Faster-Whisper..."
+.venv/bin/python -m pip install --target .venv/cuda12 \
+    nvidia-cublas-cu12 \
+    "nvidia-cudnn-cu12==9.*"
+
 # ------------------------------------------------------------
 # 5. Pin a known Python-3.13 spaCy wheel.
 #
