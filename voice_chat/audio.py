@@ -44,7 +44,7 @@ class SileroSpeechDetector:
         self.sample_rate = audio_cfg.sample_rate
         self.threshold = stt_cfg.vad_threshold
         self.min_speech_ms = stt_cfg.vad_min_speech_ms
-        self.min_silence_ms = max(80, min(stt_cfg.vad_min_silence_ms, 500))
+        self.min_silence_ms = max(80, min(stt_cfg.vad_min_silence_ms, 1000))
         self.window_samples = max(
             512, int(self.sample_rate * audio_cfg.vad_window_ms / 1000)
         )
